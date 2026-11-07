@@ -1,4 +1,4 @@
-﻿param(
+param(
     [Parameter(Mandatory = $true)]
     [string]$RepoDir
 )
@@ -151,7 +151,7 @@ Write-Host "  + Che do Config      : STAGE 1 (Mo IONDRVSupport + -nvoff + -v de 
 Write-Host ""
 
 # 5. Tuy chon chep thang ra USB FAT32
-Write-Host "[5/5] Chep bo EFI + Bo cong cu Hậu cài đặt sang USB FAT32..." -ForegroundColor Yellow
+Write-Host "[5/5] Chep bo EFI + Bo cong cu Hau cai dat sang USB FAT32..." -ForegroundColor Yellow
 $usbAns = Read-Host "      Nhap ky tu o USB FAT32 (vi du: E) de chep tu dong, hoac nhan [Enter] neu ban tu chep tay"
 if (-not [string]::IsNullOrWhiteSpace($usbAns)) {
     $driveLetter = $usbAns.Trim().Substring(0, 1).ToUpper()
