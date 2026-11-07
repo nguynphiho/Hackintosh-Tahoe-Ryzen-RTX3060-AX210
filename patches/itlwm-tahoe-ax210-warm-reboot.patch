@@ -1,0 +1,230 @@
+diff --git a/itlwm/hal_iwx/ItlIwx.cpp b/itlwm/hal_iwx/ItlIwx.cpp
+index f80e5cb..6735f59 100644
+--- a/itlwm/hal_iwx/ItlIwx.cpp
++++ b/itlwm/hal_iwx/ItlIwx.cpp
+@@ -2594,6 +2594,8 @@ iwx_reset_rx_ring(struct iwx_softc *sc, struct iwx_rx_ring *ring)
+         memset(ring->stat, 0, sizeof(uint16_t));
+     else
+         memset(ring->stat, 0, sizeof(struct iwx_rb_status));
++    if (ring->used_desc_dma.vaddr != NULL)
++        memset(ring->used_desc_dma.vaddr, 0, ring->used_desc_dma.size);
+     //    bus_dmamap_sync(sc->sc_dmat, ring->stat_dma.map, 0,
+     //        ring->stat_dma.size, BUS_DMASYNC_POSTWRITE);
+     
+@@ -10777,6 +10779,7 @@ iwx_init(struct _ifnet *ifp)
+         ic->ic_event_handler(ic, IEEE80211_EVT_DRIVER_RESET_BEGIN, NULL);
+ #endif
+     for (int attempt = 0; ; attempt++) {
++        sc->sc_flags &= ~IWX_FLAG_HW_ERR;
+         err = iwx_init_hw(sc);
+         if (generation != sc->sc_generation)
+             return ENXIO;
+@@ -10784,10 +10787,13 @@ iwx_init(struct _ifnet *ifp)
+             break;
+         generation = ++sc->sc_generation;
+         iwx_stop_device(sc);
+-        if (attempt != 0 || err == ENXIO || !(ifp->if_flags & IFF_UP) ||
+-            (sc->sc_flags & (IWX_FLAG_RFKILL | IWX_FLAG_HW_ERR)))
++        sc->sc_flags &= ~IWX_FLAG_HW_ERR;
++        if (attempt >= 2 || (sc->sc_flags & IWX_FLAG_SHUTDOWN) || !(ifp->if_flags & IFF_UP) ||
++            (sc->sc_flags & IWX_FLAG_RFKILL))
+             return err;
+-        XYLog("%s: retrying firmware initialization after error %d\n", DEVNAME(sc), err);
++        IOLog("ItlIwx: %s retrying firmware initialization (attempt %d) after error %d\n",
++              DEVNAME(sc), attempt + 2, err);
++        DELAY(50000);
+     }
+     
+     if (sc->sc_nvm.sku_cap_11n_enable)
+@@ -13345,6 +13351,122 @@ iwx_match(IOPCIDevice *device)
+                          nitems(iwx_devices));
+ }
+ 
++void ItlIwx::
++iwx_quiesce_warm_boot_hw(struct iwx_softc *sc)
++{
++    /*
++     * On warm Restart from Windows (Netwtw10.sys), 3.3V PCIe power remains up
++     * and AX210/Gen2+ cards stay in D0A with MSI-X, busmaster DMA, and
++     * CSR_AUTO_FUNC_BOOT_ENA pointing at stale Windows physical RAM addresses.
++     * Quiesce CSR state and transition D0A -> D0U cleanly before bringup.
++     */
++    iwx_disable_interrupts(sc);
++    IWX_WRITE(sc, IWX_CSR_MSIX_FH_INT_MASK_AD, ~0);
++    IWX_WRITE(sc, IWX_CSR_MSIX_HW_INT_MASK_AD, ~0);
++    if (sc->sc_device_family >= IWX_DEVICE_FAMILY_AX210) {
++        IWX_CLRBITS(sc, IWX_CSR_CTXT_INFO_BOOT_CTRL,
++                    IWX_CSR_AUTO_FUNC_BOOT_ENA);
++    }
++    IWX_CLRBITS(sc, IWX_CSR_GP_CNTRL,
++                IWX_CSR_GP_CNTRL_REG_FLAG_MAC_ACCESS_REQ);
++    sc->sc_nic_locks = 0;
++    iwx_apm_stop(sc);
++    IWX_SETBITS(sc, IWX_CSR_RESET, IWX_CSR_RESET_REG_FLAG_SW_RESET);
++    DELAY(10000);
++}
++
++void ItlIwx::
++iwx_pcie_flr_reset(struct iwx_softc *sc)
++{
++    IOPCIDevice *dev = sc->sc_pcitag;
++    if (!dev || !sc->sc_cap_off)
++        return;
++
++    uint32_t dcap = pci_conf_read(sc->sc_pct, dev, sc->sc_cap_off + PCI_PCIE_DCAP);
++    if ((dcap & 0x10000000U) == 0) /* PCI_EXP_DEVCAP_FLR (bit 28) */
++        return;
++
++    IOLog("ItlIwx: %s initiating PCIe Function-Level Reset (FLR) recovery\n", DEVNAME(sc));
++    dev->saveDeviceState();
++
++    uint32_t stdCfg[16];
++    for (int i = 0; i < 16; i++)
++        stdCfg[i] = dev->configRead32(i * 4);
++
++    UInt8 msiCap = 0, msixCap = 0;
++    uint16_t msiCtrl = 0;
++    uint32_t msiAddrLo = 0, msiAddrHi = 0, msiData = 0;
++    dev->findPCICapability(0x05 /* PCI_CAP_ID_MSI */, &msiCap);
++    if (msiCap) {
++        msiCtrl = dev->configRead16(msiCap + 2);
++        msiAddrLo = dev->configRead32(msiCap + 4);
++        if (msiCtrl & 0x0080U) {
++            msiAddrHi = dev->configRead32(msiCap + 8);
++            msiData = dev->configRead32(msiCap + 12);
++        } else {
++            msiData = dev->configRead32(msiCap + 8);
++        }
++    }
++    dev->findPCICapability(0x11 /* PCI_CAP_ID_MSIX */, &msixCap);
++
++    uint32_t pcieDcsr = dev->configRead32(sc->sc_cap_off + PCI_PCIE_DCSR);
++    uint32_t pcieLcsr = dev->configRead32(sc->sc_cap_off + PCI_PCIE_LCSR);
++    uint32_t pcieDcsr2 = dev->configRead32(sc->sc_cap_off + PCI_PCIE_DCSR2);
++
++    dev->setBusMasterEnable(false);
++    for (int t = 0; t < 100; t++) {
++        if ((dev->configRead32(sc->sc_cap_off + PCI_PCIE_DCSR) & 0x00200000U) == 0)
++            break;
++        DELAY(1000);
++    }
++
++    uint16_t dctl = dev->configRead16(sc->sc_cap_off + PCI_PCIE_DCSR);
++    dev->configWrite16(sc->sc_cap_off + PCI_PCIE_DCSR, dctl | 0x8000U);
++
++    /* PCIe Base Spec 6.6.2: wait >= 100ms after FLR initiation */
++    DELAY(110000);
++    for (int t = 0; t < 200; t++) {
++        uint16_t vid = dev->configRead16(kIOPCIConfigVendorID);
++        if (vid != 0xFFFF && vid != 0x0000)
++            break;
++        DELAY(1000);
++    }
++
++    dev->restoreDeviceState();
++
++    for (int regOff = 0x10; regOff <= 0x24; regOff += 4) {
++        if (dev->configRead32(regOff) == 0 && stdCfg[regOff / 4] != 0)
++            dev->configWrite32(regOff, stdCfg[regOff / 4]);
++    }
++    dev->configWrite32(0x0C, stdCfg[3]);
++    dev->configWrite32(0x3C, stdCfg[15]);
++    dev->configWrite16(sc->sc_cap_off + PCI_PCIE_DCSR, (uint16_t)(pcieDcsr & 0x7FFFU));
++    dev->configWrite16(sc->sc_cap_off + PCI_PCIE_LCSR, (uint16_t)pcieLcsr);
++    dev->configWrite16(sc->sc_cap_off + PCI_PCIE_DCSR2, (uint16_t)pcieDcsr2);
++
++    if (msixCap) {
++        uint16_t mx = dev->configRead16(msixCap + 2);
++        dev->configWrite16(msixCap + 2, mx & ~0x8000U);
++    }
++    if (msiCap) {
++        dev->configWrite32(msiCap + 4, msiAddrLo);
++        if (msiCtrl & 0x0080U) {
++            dev->configWrite32(msiCap + 8, msiAddrHi);
++            dev->configWrite16(msiCap + 12, (uint16_t)msiData);
++        } else {
++            dev->configWrite16(msiCap + 8, (uint16_t)msiData);
++        }
++        dev->configWrite16(msiCap + 2, msiCtrl | 0x0001U);
++    }
++
++    dev->configWrite8(0x41, 0);
++    uint32_t cmd = dev->configRead32(PCI_COMMAND_STATUS_REG);
++    cmd |= (PCI_COMMAND_MASTER_ENABLE | PCI_COMMAND_MEM_ENABLE);
++    cmd &= ~PCI_COMMAND_INTERRUPT_DISABLE;
++    dev->configWrite32(PCI_COMMAND_STATUS_REG, cmd);
++    DELAY(5000);
++}
++
+ int ItlIwx::
+ iwx_preinit(struct iwx_softc *sc)
+ {
+@@ -13358,7 +13480,7 @@ iwx_preinit(struct iwx_softc *sc)
+ 
+     struct ieee80211com *ic = &sc->sc_ic;
+     struct _ifnet *ifp = IC2IFP(ic);
+-    int err, generation = sc->sc_generation;
++    int err = 0, generation = sc->sc_generation;
+     static int attached;
+     
+     err = iwx_prepare_card_hw(sc);
+@@ -13374,16 +13496,37 @@ iwx_preinit(struct iwx_softc *sc)
+         return 0;
+     }
+     
+-    err = iwx_start_hw(sc);
+-    if (err) {
+-        XYLog("%s: could not initialize hardware\n", DEVNAME(sc));
+-        return err;
++    iwx_quiesce_warm_boot_hw(sc);
++
++    const int kMaxPreinitAttempts = 4;
++    for (int attempt = 0; attempt < kMaxPreinitAttempts; attempt++) {
++        sc->sc_flags &= ~IWX_FLAG_HW_ERR;
++        generation = sc->sc_generation;
++
++        err = iwx_start_hw(sc);
++        if (!err) {
++            err = iwx_run_init_mvm_ucode(sc, 1);
++            if (generation != sc->sc_generation &&
++                (sc->sc_flags & IWX_FLAG_SHUTDOWN))
++                return ENXIO;
++        }
++        iwx_stop_device(sc);
++        sc->sc_flags &= ~IWX_FLAG_HW_ERR;
++        task_del(systq, &sc->init_task);
++        if (!err) {
++            if (attempt > 0)
++                IOLog("ItlIwx: %s warm-reboot recovery succeeded on preinit attempt %d\n",
++                      DEVNAME(sc), attempt + 1);
++            break;
++        }
++        IOLog("ItlIwx: %s preinit attempt %d/%d failed (err=%d), resetting hardware\n",
++              DEVNAME(sc), attempt + 1, kMaxPreinitAttempts, err);
++        if (attempt + 1 < kMaxPreinitAttempts) {
++            if (attempt == 1)
++                iwx_pcie_flr_reset(sc);
++            DELAY(50000);
++        }
+     }
+-    
+-    err = iwx_run_init_mvm_ucode(sc, 1);
+-    if (generation != sc->sc_generation)
+-        return ENXIO;
+-    iwx_stop_device(sc);
+     if (err)
+         return err;
+     
+diff --git a/itlwm/hal_iwx/ItlIwx.hpp b/itlwm/hal_iwx/ItlIwx.hpp
+index 8360ff1..c567e03 100644
+--- a/itlwm/hal_iwx/ItlIwx.hpp
++++ b/itlwm/hal_iwx/ItlIwx.hpp
+@@ -271,6 +271,8 @@ public:
+     void    iwx_conf_msix_hw(struct iwx_softc *, int);
+     int    iwx_start_hw(struct iwx_softc *);
+     void    iwx_stop_device(struct iwx_softc *);
++    void    iwx_quiesce_warm_boot_hw(struct iwx_softc *);
++    void    iwx_pcie_flr_reset(struct iwx_softc *);
+     void    iwx_nic_config(struct iwx_softc *);
+     int    iwx_nic_rx_init(struct iwx_softc *);
+     int    iwx_nic_init(struct iwx_softc *);

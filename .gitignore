@@ -1,0 +1,21 @@
+# macOS metadata
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Never commit personal EFI backups, real serial backups, or large external installers
+EFI-Backup-*
+*.bak*
+*.before-*
+*.nullmoth-*
+*.dmg
+*.pkg
+*.tar.gz
+*.iso
+*.raw
+opencore-*.txt
+
+# Scratch / build artifacts
+build/
+/tmp/
