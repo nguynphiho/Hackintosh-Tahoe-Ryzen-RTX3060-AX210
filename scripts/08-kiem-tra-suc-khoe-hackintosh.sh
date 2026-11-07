@@ -37,6 +37,15 @@ else
   warn "Chưa kích hoạt được Metal 3 trên card đồ họa rời"
 fi
 
+BAR_INFO=$(ioreg -r -n NVRM -d 1 -l 2>/dev/null | grep '"nvrm-bars"' || true)
+if [ -n "$BAR_INFO" ]; then
+  if printf '%s\n' "$BAR_INFO" | grep "bar1@[^ ]*+0x10000000 " >/dev/null; then
+    warn "BAR1 đang bị giới hạn ở 256 MB (hãy bật Above 4G Decoding + Resizable BAR trong BIOS để tránh màn hình đen trỏ chuột)"
+  else
+    ok "Cửa sổ PCIe BAR1 đã mở rộng (Resizable BAR bật chuẩn — chống tràn bộ nhớ gây màn hình đen trỏ chuột)"
+  fi
+fi
+
 echo "3. Wi-Fi Native Apple & Bluetooth (Intel Wi-Fi 6E AX210):"
 KEXT_LIST=$(kmutil showloaded --list-only 2>/dev/null || kextstat 2>/dev/null || true)
 if printf '%s\n' "$KEXT_LIST" | grep "com.zxystd.AirportItlwm" >/dev/null; then
@@ -74,13 +83,17 @@ else
 fi
 
 echo "5. Kiểm định cấu hình chuẩn của Repo bằng ocvalidate 1.0.9:"
-if [ -x "$REPO_DIR/tools/ocvalidate/ocvalidate" ] && [ -f "$REPO_DIR/EFI/OC/config.plist" ]; then
-  OCV=$("$REPO_DIR/tools/ocvalidate/ocvalidate" "$REPO_DIR/EFI/OC/config.plist" 2>&1 || true)
-  if printf '%s\n' "$OCV" | grep "No issues found." >/dev/null; then
-    ok "EFI/OC/config.plist trong repo đạt chuẩn 100% (ocvalidate: No issues found)"
-  else
-    warn "ocvalidate báo lưu ý trên EFI/OC/config.plist"
-  fi
+if [ -x "$REPO_DIR/tools/ocvalidate/ocvalidate" ]; then
+  for cname in config.plist config-stage1-cai-moi.plist config-stage2-full-rtx3060.plist; do
+    if [ -f "$REPO_DIR/EFI/OC/$cname" ]; then
+      OCV=$("$REPO_DIR/tools/ocvalidate/ocvalidate" "$REPO_DIR/EFI/OC/$cname" 2>&1 || true)
+      if printf '%s\n' "$OCV" | grep "No issues found." >/dev/null; then
+        ok "EFI/OC/$cname đạt chuẩn 100% (ocvalidate: No issues found)"
+      else
+        warn "ocvalidate báo lưu ý trên EFI/OC/$cname"
+      fi
+    fi
+  done
 fi
 
 echo "=================================================================="

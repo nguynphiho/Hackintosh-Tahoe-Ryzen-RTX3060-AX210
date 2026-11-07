@@ -17,5 +17,6 @@ EFI-Backup-*
 opencore-*.txt
 
 # Scratch / build artifacts
+com.apple.recovery.boot/
 build/
 /tmp/
