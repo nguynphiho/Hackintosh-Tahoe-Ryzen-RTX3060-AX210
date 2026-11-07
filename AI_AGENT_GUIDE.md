@@ -65,7 +65,8 @@ Nếu CPU AMD Ryzen của người dùng có số nhân vật lý khác `6` (ví
 5. Nhắc người dùng kiểm tra BIOS (`Above 4G Decoding = Enabled`, **`Resizable BAR = Enabled`**, `CSM = Disabled`, `Secure Boot = Disabled`) trước khi boot USB.
 
 ### Kịch bản B: Vừa cài mới xong macOS Tahoe 26 từ USB (Đang ở Stage 1) -> Lên Full Hoàn Thiện (Stage 2)
-Thực thi tuần tự 4 script:
+- **Lưu ý quan trọng ngay sau khi cài mới xong lần đầu**: Trên macOS Tahoe 26, *Liquid Glass Setup Assistant* đòi shader Metal nên ở Stage 1 (VESA, chưa cài NullMoth) máy sẽ hiện **màn hình đen chỉ có con trỏ chuột** ở bước tạo tài khoản đầu tiên. Hãy hướng dẫn người dùng vào `Recovery -> Utilities -> Terminal` chạy `bash /Volumes/*/HACKINTOSH-TOOLS/scripts/01b-tao-user-bo-qua-man-hinh-den-setup.sh` (hoặc `bash /Volumes/*/tao-user.sh`) để tạo Admin User (`dscl`) + `.AppleSetupDone`, sau đó reboot vào thẳng màn hình Login & Desktop!
+- Khi đã vào Desktop, thực thi tuần tự 4 script:
 ```bash
 # 1. Tự tải (kèm check SHA-256 từ GitHub NullMoth) hoặc cài Offline driver RTX 3060 & nâng EFI lên Stage 2
 sudo bash scripts/02-cai-driver-rtx3060-sau-tahoe.sh

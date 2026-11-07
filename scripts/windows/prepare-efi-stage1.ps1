@@ -195,6 +195,10 @@ if (-not [string]::IsNullOrWhiteSpace($usbAns)) {
             Copy-Item -LiteralPath $srcItem -Destination (Join-Path $toolsDest $item) -Recurse -Force
         }
     }
+    $setupBypassScript = Join-Path $RepoDir "scripts\01b-tao-user-bo-qua-man-hinh-den-setup.sh"
+    if (Test-Path -LiteralPath $setupBypassScript) {
+        Copy-Item -LiteralPath $setupBypassScript -Destination "${usbRoot}tao-user.sh" -Force
+    }
 
     Write-Host "      [OK] Da chuan bi xong USB tai $usbRoot !" -ForegroundColor Green
     Write-Host "      MEO: Neu ban da tai 1401-Mac-2.7.2.dmg va nullmoth-nvidia-2.7.2.tar.gz tren Windows," -ForegroundColor Cyan

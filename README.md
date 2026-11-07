@@ -77,6 +77,7 @@ Hackintosh-Tahoe-Ryzen-RTX3060-AX210/
 │   │   └── fix-wifi-dualboot-windows11.cmd           # Tắt Fast Startup / Hiberboot & WoWLAN bên Windows 11
 │   ├── 00-tao-smbios-rieng.sh                        # Tạo Serial / MLB / UUID / ROM riêng trên macOS / Linux
 │   ├── 01-chuan-bi-len-tahoe.sh                      # Chuẩn bị EFI khi nâng cấp từ macOS Sequoia 15 lên Tahoe 26
+│   ├── 01b-tao-user-bo-qua-man-hinh-den-setup.sh     # Tạo User Admin + .AppleSetupDone (vượt màn hình đen Setup Assistant!)
 │   ├── 02-cai-driver-rtx3060-sau-tahoe.sh            # Tự tải/cài NullMoth RTX 3060 + nâng EFI lên Stage 2 + gom 1401
 │   ├── 03-kich-hoat-wifi-native-ax210.sh             # Bật Wi-Fi Native Apple trên Tahoe 26 (gỡ HeliPort & OCLP cũ)
 │   ├── 04-cap-nhat-wifi-dualboot-ax210.sh            # Cập nhật nhanh kext vá lỗi Restart từ Windows sang macOS
@@ -170,7 +171,18 @@ Lưu BIOS (`F10`) và nhấn phím tắt chọn Boot Menu (`F12` / `F11` / `F8` 
    - Bấm **Erase** → Đợi báo *Done* rồi đóng cửa sổ Disk Utility (`Cmd/Win + Q`).
 4. **Tiến hành cài đặt macOS Tahoe**:
    - Chọn **Reinstall macOS Tahoe** → Continue → Chọn ổ **`Macintosh HD`**.
-   - Trong quá trình cài đặt, máy sẽ **tự động khởi động lại 3 đến 4 lần**. Ở mỗi lần khởi động lại, cứ cắm nguyên USB để OpenCore tự động chọn tiếp mục `macOS Installer` (và cuối cùng là `Macintosh HD`) cho tới khi hiện màn hình chào mừng *Select Your Country or Region*!
+   - Trong quá trình cài đặt, máy sẽ **tự động khởi động lại 3 đến 4 lần**. Ở mỗi lần khởi động lại, cứ cắm nguyên USB để OpenCore tự động chọn tiếp mục `macOS Installer` (và cuối cùng là `Macintosh HD`).
+5. **Vượt qua màn hình đen Liquid Glass Setup Assistant ở lần vào đầu tiên (QUAN TRỌNG CHO CÀI MỚI TRÊN CARD RỜI NVIDIA!)**:
+   - Trên **macOS Tahoe 26**, màn hình chào mừng chọn Quốc gia / Tạo tài khoản lần đầu (*Liquid Glass Setup Assistant*) bắt buộc dùng shader Metal — trong khi máy cài mới ở Stage 1 chưa cài driver NullMoth nên đang chạy VESA, dẫn đến khi cài xong 100% vào lần đầu sẽ thấy **màn hình đen thui chỉ có mỗi con trỏ chuột di chuyển được**!
+   - **Cách vượt qua chỉ trong 20 giây để vào thẳng Màn hình Đăng nhập & Desktop**:
+     1. Khởi động lại máy → tại màn hình OpenCanopy nhấn phím **`Space`** → chọn lại **`Recovery` (trên USB)**.
+     2. Trên thanh menu trên cùng, bấm **Utilities → Terminal** và chạy lệnh tạo sẵn tài khoản Admin + cờ `.AppleSetupDone`:
+        ```bash
+        bash /Volumes/*/tao-user.sh
+        ```
+        *(Hoặc: `bash /Volumes/*/HACKINTOSH-TOOLS/scripts/01b-tao-user-bo-qua-man-hinh-den-setup.sh`).*
+     3. Nhập **Username** và **Password** bạn muốn đặt cho máy Mac → gõ `reboot`.
+     4. Lần này chọn **`Macintosh HD`**, máy sẽ bỏ qua Setup Assistant và **hiện thẳng ô nhập mật khẩu Đăng nhập vào Desktop macOS Tahoe sáng rõ 100%**!
 
 ---
 
@@ -222,6 +234,7 @@ Nếu máy bạn đã cài sẵn Hackintosh **macOS Sequoia 15** và muốn nân
 
 | # | Nguyên nhân gốc rễ | Hiện tượng khi gặp lỗi | Thiết lập đã tích hợp sẵn trong Repo |
 | :-: | :--- | :--- | :--- |
+| **0** | **Cài mới từ đầu xong chưa có tài khoản (`Liquid Glass Setup Assistant` đòi Metal khi đang ở VESA Stage 1)** | Vừa cài xong macOS Tahoe 26 lần đầu vào thấy **màn hình đen thui chỉ có con trỏ chuột**, không hiện bảng chọn Quốc gia / tạo User | Boot vào USB `Recovery` → `Utilities -> Terminal` → chạy **`bash /Volumes/*/tao-user.sh`** (`01b-tao-user-bo-qua-man-hinh-den-setup.sh`) để tạo sẵn Username/Password + `.AppleSetupDone` → vào thẳng màn hình Đăng nhập & Desktop! |
 | **1** | `WindowServer` (binary gốc của Apple) từ chối nạp gói Metal ad-hoc của NullMoth | Vào tới màn hình đăng nhập tối đen hoàn toàn, chỉ di chuyển được con trỏ chuột trắng/màu | Nạp `AMFIPass.kext` ngay sau `Lilu.kext` + `-lilubetaall` + `amfi_get_out_of_my_way=0x1 amfi=0x80 ipc_control_port_options=0` + `csr-active-config = 430A0000` (`0x0A43`) + `SecureBootModel = Disabled` |
 | **2** | Tắt `Resizable BAR` trong BIOS làm cửa sổ PCIe `BAR1` chỉ còn `256 MB` | Tràn bộ nhớ `BAR1` ngay lúc vẽ màn hình đăng nhập → màn hình đen, chỉ còn trỏ chuột | Bật **`Above 4G Decoding` + `Resizable BAR = Enabled`** trong BIOS (mở `BAR1 = 8 GB`), kết hợp `ResizeGpuBars = -1` & `ResizeAppleGpuBars = 0` trong OpenCore |
 | **3** | Xung đột framebuffer gốc `com.apple.iokit.IONDRVSupport` | Chặn quá sớm khi cài USB thì mất hình lúc cài; quên chặn sau khi cài NullMoth thì `IONDRV` cướp màn hình số 0 gây đen màn hình | Tách rõ **Stage 1** (`Enabled = False` lúc cài USB) và **Stage 2** (`Enabled = True`, `MaxKernel = ""` sau khi cài NullMoth) |
